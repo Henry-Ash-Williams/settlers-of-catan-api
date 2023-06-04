@@ -1,0 +1,185 @@
+use std::collections::HashMap;
+use std::mem::variant_count;
+
+pub(self) use anyhow::{anyhow, Result};
+use uuid::Uuid;
+
+use crate::development_cards::*;
+use crate::player::PlayerColour;
+use crate::resources::*;
+use crate::trade::Trade;
+
+use DevelopmentCard::*;
+
+pub const TOTAL_RESOURCES: usize = 19;
+
+pub struct Bank {
+    development_cards: HashMap<DevelopmentCard, usize>,
+    resources: Resources,
+    trades: HashMap<Uuid, Trade>,
+}
+
+impl Bank {
+    pub fn new() -> Self {
+        Bank {
+            development_cards: HashMap::from([
+                (YearOfPlenty, 2),
+                (RoadBuilding, 2),
+                (Monopoly, 2),
+                (HiddenVictoryPoint, 5),
+                (Knight, 14),
+            ]),
+            resources: Resources::new_with_amount(TOTAL_RESOURCES),
+            trades: HashMap::new(),
+        }
+    }
+
+    pub fn distribute_random_development_card(&mut self) -> Result<DevelopmentCard> {
+        let mut i = 0;
+        loop {
+            let dev_card_kind = DevelopmentCard::random();
+            let dev_card = self.development_cards.get_mut(&dev_card_kind);
+            match dev_card {
+                Some(n) if *n > 0 => {
+                    *n -= 1;
+                    break Ok(dev_card_kind);
+                }
+                Some(_) | None => (),
+            };
+            i += 1;
+
+            if i == variant_count::<DevelopmentCard>() {
+                break Err(anyhow!("No development cards available"));
+            }
+        }
+    }
+
+    pub fn distribute_resource(&mut self, kind: ResourceKind, amount: usize) -> Result<Resources> {
+        if (self.resources[kind] as i32) - (amount as i32) < 0 {
+            return Err(anyhow!("Cannot distribute that amount of resources"));
+        };
+
+        let mut distributed_resources = Resources::new();
+        distributed_resources[kind] = amount;
+        self.resources[kind] -= amount;
+
+        Ok(distributed_resources)
+    }
+
+    pub fn return_resources(&mut self, resources: Resources) {
+        self.resources += resources;
+    }
+
+    pub fn return_dev_card(&mut self, kind: DevelopmentCard) {
+        *self.development_cards.get_mut(&kind).unwrap() += 1;
+    }
+
+    pub fn get_trade(&self, trade_id: Uuid) -> Option<&Trade> {
+        self.trades.get(&trade_id)
+    }
+
+    pub fn get_trade_mut(&mut self, trade_id: Uuid) -> Option<&mut Trade> {
+        self.trades.get_mut(&trade_id)
+    }
+
+    pub fn propose_trade(
+        &mut self,
+        from: PlayerColour,
+        offering: Resources,
+        wants: Resources,
+    ) -> Uuid {
+        let t = Trade::new(from, offering, wants);
+        let uuid = Uuid::new_v4();
+        self.trades.insert(uuid, t);
+        uuid
+    }
+
+    pub fn accept_trade(&mut self, trade_id: Uuid, accepted_by: PlayerColour) -> Result<()> {
+        let trade = self.trades.get_mut(&trade_id);
+
+        if let None = trade {
+            return Err(anyhow!("Trade not found"));
+        };
+
+        trade.unwrap().accept(accepted_by)?;
+
+        Ok(())
+    }
+
+    pub fn finalize_trade(&mut self, trade_id: Uuid, player: PlayerColour) -> Result<()> {
+        let trade = self.trades.get_mut(&trade_id);
+
+        if trade.is_none() {
+            return Err(anyhow!("Trade not found"));
+        }
+
+        trade.unwrap().confirm_recipient(player)?;
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::Bank;
+    use crate::{resources::Resources, *};
+
+    #[test]
+    fn test_init() {
+        let b = Bank::new();
+
+        assert_eq!(b.resources[Ore], 19);
+        assert_eq!(b.resources[Wool], 19);
+        assert_eq!(b.resources[Grain], 19);
+        assert_eq!(b.resources[Lumber], 19);
+        assert_eq!(b.resources[Brick], 19);
+
+        assert_eq!(b.development_cards.get(&YearOfPlenty), Some(&2));
+        assert_eq!(b.development_cards.get(&Monopoly), Some(&2));
+        assert_eq!(b.development_cards.get(&Knight), Some(&14));
+        assert_eq!(b.development_cards.get(&RoadBuilding), Some(&2));
+        assert_eq!(b.development_cards.get(&HiddenVictoryPoint), Some(&5));
+    }
+
+    #[test]
+    fn test_dev_card_distribution() {
+        let mut b = Bank::new();
+        let dev_card = b.distribute_random_development_card();
+
+        assert!(dev_card.is_ok());
+    }
+
+    #[test]
+    fn test_resource_distribution() {
+        let mut b = Bank::new();
+        let resources = b.distribute_resource(Ore, 5);
+
+        assert!(resources.is_ok_and(|r| r == Resources::new_explicit(5, 0, 0, 0, 0)));
+        assert_eq!(b.resources[Ore], 14);
+
+        let more_resources = b.distribute_resource(Ore, 20);
+        assert!(more_resources.is_err());
+        assert_eq!(b.resources[Ore], 14);
+    }
+
+    #[test]
+    fn test_resource_return() {
+        let mut b = Bank::new();
+        let resources = b.distribute_resource(Ore, 4).unwrap();
+        assert_eq!(b.resources[Ore], 15);
+        b.return_resources(resources);
+        assert_eq!(b.resources[Ore], 19);
+    }
+
+    #[test]
+    fn test_propose_trade() {
+        let mut b = Bank::new();
+        let mut p1 = player::PlayerColour::Red;
+        let trade_id = b.propose_trade(
+            p1,
+            Resources::new_explicit(0, 0, 1, 0, 1),
+            Resources::new_explicit(2, 0, 0, 0, 0),
+        );
+        assert_eq!(b.trades.len(), 1);
+    }
+}
