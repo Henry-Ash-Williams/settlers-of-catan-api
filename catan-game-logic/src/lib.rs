@@ -1,5 +1,6 @@
 #![feature(hash_drain_filter)]
 #![feature(variant_count)]
+#![allow(dead_code)]
 
 pub(crate) mod bank;
 pub(crate) mod board;

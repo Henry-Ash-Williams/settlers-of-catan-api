@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::ops::{Add, AddAssign};
 use std::ops::{Index, IndexMut};
+use std::ops::{Mul, MulAssign};
 use std::ops::{Sub, SubAssign};
 
 use crate::building::Building;
@@ -80,7 +81,7 @@ impl Resources {
         }
     }
 
-    pub fn to_json(&self) -> String {
+    pub fn to_json(self) -> String {
         serde_json::to_string(&self).unwrap()
     }
 
@@ -165,6 +166,30 @@ impl SubAssign<Resources> for Resources {
     }
 }
 
+impl Mul<usize> for Resources {
+    type Output = Resources;
+
+    fn mul(self, scalar: usize) -> Self::Output {
+        Resources {
+            ore: self.ore * scalar,
+            grain: self.grain * scalar,
+            wool: self.wool * scalar,
+            brick: self.brick * scalar,
+            lumber: self.lumber * scalar,
+        }
+    }
+}
+
+impl MulAssign<usize> for Resources {
+    fn mul_assign(&mut self, scalar: usize) {
+        self.ore *= scalar;
+        self.grain *= scalar;
+        self.wool *= scalar;
+        self.brick *= scalar;
+        self.lumber *= scalar;
+    }
+}
+
 impl IntoIterator for Resources {
     type Item = (ResourceKind, usize);
     type IntoIter = std::array::IntoIter<Self::Item, 5>;
@@ -178,6 +203,12 @@ impl IntoIterator for Resources {
             (Lumber, self.lumber),
         ]
         .into_iter()
+    }
+}
+
+impl Default for Resources {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

@@ -1,18 +1,24 @@
 use crate::board::Board;
+use crate::resources::Resources;
+use crate::trade::TradeState::*;
 use crate::Player;
 use crate::{bank::Bank, player::PlayerColour};
 
 use anyhow::{anyhow, Result};
 use rand::{thread_rng, Rng};
 
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
 pub enum GameState {
     Setup,
     Running,
     Complete,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct Game {
     players: Vec<Player>,
     board: Board,
@@ -40,6 +46,10 @@ impl Game {
         }
     }
 
+    pub fn add_player(&mut self, colour: PlayerColour) {
+        self.players.push(Player::new(colour));
+    }
+
     pub fn roll_dice(&self) -> (u8, u8) {
         let mut rng = thread_rng();
         (rng.gen_range(1..6), rng.gen_range(1..6))
@@ -59,27 +69,184 @@ impl Game {
             .ok_or(anyhow!("Could not find that player"))
     }
 
+    /// Handle the final step of trading, moving the resources between the two players
     pub fn finalize_trade(&mut self, trade_id: Uuid) -> Result<()> {
-        match self.bank.get_trade_mut(trade_id) {
-            Some(trade) => {
-                let offering = trade.offering().clone();
-                let wants = trade.wants().clone();
+        let trade = match self.bank.get_trade(trade_id) {
+            Some(trade) => trade.clone(),
+            None => return Err(anyhow!("Could not find trade with that ID")),
+        };
 
-                let from = self.get_player_mut(trade.get_offering_player())?;
-                *from.resources_mut() += wants - offering;
+        match trade.state() {
+            Accepted => (),
+            LockedIn | Proposed => return Err(anyhow!("Cannot finalize trade at this time")),
+        };
 
-                let to = self.get_player_mut(trade.get_trade_partner()?)?;
-                *to.resources_mut() += offering - wants;
+        let offering: Resources = *trade.offering();
+        let wants: Resources = *trade.wants();
+        let offering_player = trade.get_offering_player();
+        let trade_partner = trade.get_trade_partner()?;
 
-                Ok(())
+        {
+            let from = self.get_player_mut(offering_player)?;
+            if *from.resources() < offering {
+                return Err(anyhow!("Not enough resources to make this trade"));
+            } else {
+                *from.resources_mut() += wants;
+                *from.resources_mut() -= offering;
             }
-            None => Err(anyhow!("Could not find trade with that ID")),
         }
+
+        {
+            let to = self.get_player_mut(trade_partner)?;
+            if *to.resources() < wants {
+                return Err(anyhow!("Not enough resources to make this trade"));
+            } else {
+                *to.resources_mut() += offering;
+                *to.resources_mut() -= wants;
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn get_bank(&self) -> &Bank {
+        &self.bank
+    }
+
+    pub fn get_bank_mut(&mut self) -> &mut Bank {
+        &mut self.bank
     }
 }
 
 impl Default for Game {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{bank::*, board::*, game::*};
+    #[test]
+    fn test_init() {
+        let g = Game::new();
+        assert_eq!(
+            g,
+            Game {
+                players: Vec::new(),
+                board: Board::new(),
+                bank: Bank::new(),
+                state: GameState::Setup,
+                turn_no: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn test_add_player() {
+        let mut g = Game::new();
+        assert_eq!(
+            g,
+            Game {
+                players: Vec::new(),
+                board: Board::new(),
+                bank: Bank::new(),
+                state: GameState::Setup,
+                turn_no: 0,
+            }
+        );
+        g.add_player(PlayerColour::Red);
+        g.add_player(PlayerColour::Green);
+        g.add_player(PlayerColour::Blue);
+        g.add_player(PlayerColour::Purple);
+
+        assert_eq!(
+            g,
+            Game {
+                players: vec![
+                    Player::new(PlayerColour::Red),
+                    Player::new(PlayerColour::Green),
+                    Player::new(PlayerColour::Blue),
+                    Player::new(PlayerColour::Purple)
+                ],
+                board: Board::new(),
+                bank: Bank::new(),
+                state: GameState::Setup,
+                turn_no: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn test_get_id() {
+        let g = Game::new();
+        let game_id = g.get_game_id();
+
+        assert!(game_id.is_ok());
+        let game_id = g.get_game_id().unwrap();
+        assert!(Uuid::parse_str(&game_id.to_string()).is_ok());
+    }
+
+    #[test]
+    fn test_roll_dice() {
+        let g = Game::new();
+        let (d1, d2) = g.roll_dice();
+        let roll = d1 + d2;
+
+        assert!(roll > 0 && roll < 12);
+    }
+
+    #[test]
+    fn test_get_player() {
+        let mut g = Game::new();
+
+        g.add_player(PlayerColour::Red);
+        g.add_player(PlayerColour::Green);
+        g.add_player(PlayerColour::Blue);
+        g.add_player(PlayerColour::Purple);
+
+        let r = g.get_player(&PlayerColour::Red);
+        assert!(r.is_ok());
+        assert_eq!(*r.unwrap().resources(), Resources::new());
+    }
+
+    #[test]
+    fn test_trade() {
+        let mut g = Game::new();
+
+        g.add_player(PlayerColour::Red);
+        g.add_player(PlayerColour::Green);
+        g.add_player(PlayerColour::Blue);
+        g.add_player(PlayerColour::Purple);
+
+        {
+            let red = g.get_player_mut(PlayerColour::Red).unwrap();
+            *red.resources_mut() = Resources::new_explicit(0, 1, 1, 0, 0);
+        }
+
+        {
+            let blue = g.get_player_mut(PlayerColour::Blue).unwrap();
+            *blue.resources_mut() = Resources::new_explicit(2, 0, 0, 0, 0);
+        }
+
+        let b = g.get_bank_mut();
+        let trade_id = b.propose_trade(
+            PlayerColour::Red,
+            Resources::new_explicit(0, 1, 1, 0, 0),
+            Resources::new_explicit(2, 0, 0, 0, 0),
+        );
+
+        b.accept_trade(trade_id, PlayerColour::Blue)
+            .expect("Could not find trade with that ID");
+        b.finalize_trade(trade_id, PlayerColour::Blue)
+            .expect("Could not find trade with that ID");
+
+        g.finalize_trade(trade_id)
+            .expect("Could not find trade with that ID");
+
+        let red = g.get_player(&PlayerColour::Red).unwrap();
+        assert_eq!(*red.resources(), Resources::new_explicit(2, 0, 0, 0, 0));
+        let blue = g.get_player(&PlayerColour::Blue).unwrap();
+        assert_eq!(*blue.resources(), Resources::new_explicit(0, 1, 1, 0, 0));
     }
 }

@@ -1,6 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 use crate::{development_cards::DevelopmentCard, resources::Resources};
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum PlayerColour {
     Red,
     Green,
@@ -9,7 +11,7 @@ pub enum PlayerColour {
     Custom { r: u8, g: u8, b: u8 },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct Player {
     colour: PlayerColour,
     resources: Resources,

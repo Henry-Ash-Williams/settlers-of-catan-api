@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::mem::variant_count;
 
 pub(self) use anyhow::{anyhow, Result};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::development_cards::*;
@@ -13,13 +14,44 @@ use DevelopmentCard::*;
 
 pub const TOTAL_RESOURCES: usize = 19;
 
+/// Bank handles distributing resources and development cards, and trades
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Bank {
     development_cards: HashMap<DevelopmentCard, usize>,
     resources: Resources,
+    #[serde(with = "uuid_map")]
     trades: HashMap<Uuid, Trade>,
 }
 
+mod uuid_map {
+    use crate::trade::Trade;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::HashMap;
+    use uuid::Uuid;
+
+    pub fn serialize<S>(map: &HashMap<Uuid, Trade>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let new_hm: HashMap<String, &Trade> = map.iter().map(|(k, v)| (k.to_string(), v)).collect();
+        new_hm.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<HashMap<Uuid, Trade>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let vec: HashMap<String, Trade> = HashMap::deserialize(deserializer).unwrap();
+        let map: HashMap<Uuid, Trade> = vec
+            .into_iter()
+            .map(|(k, v)| (Uuid::parse_str(&k).unwrap(), v))
+            .collect();
+        Ok(map)
+    }
+}
+
 impl Bank {
+    /// Create a new instance of bank with the correct number of total resources and development cards
     pub fn new() -> Self {
         Bank {
             development_cards: HashMap::from([
@@ -34,6 +66,8 @@ impl Bank {
         }
     }
 
+    /// Select a random development card, and distribute it to the player
+    /// fails if there are no more development cards to distribute
     pub fn distribute_random_development_card(&mut self) -> Result<DevelopmentCard> {
         let mut i = 0;
         loop {
@@ -54,6 +88,7 @@ impl Bank {
         }
     }
 
+    /// Distribute an amount of a specific resource
     pub fn distribute_resource(&mut self, kind: ResourceKind, amount: usize) -> Result<Resources> {
         if (self.resources[kind] as i32) - (amount as i32) < 0 {
             return Err(anyhow!("Cannot distribute that amount of resources"));
@@ -64,6 +99,13 @@ impl Bank {
         self.resources[kind] -= amount;
 
         Ok(distributed_resources)
+    }
+
+    pub fn propose_trade_with_bank(&mut self, player: PlayerColour, wants: Resources) {
+        let requirements = wants * 4;
+
+        let _trade_id = self.propose_trade(player, requirements, wants);
+        todo!()
     }
 
     pub fn return_resources(&mut self, resources: Resources) {
@@ -82,6 +124,9 @@ impl Bank {
         self.trades.get_mut(&trade_id)
     }
 
+    /// Propose a new trade to the other players
+    ///
+    /// creates a new instance of a `Trade` object, and insert it into the `trades` hashmap
     pub fn propose_trade(
         &mut self,
         from: PlayerColour,
@@ -94,10 +139,11 @@ impl Bank {
         uuid
     }
 
+    /// Indicate a player is willing to make a trade
     pub fn accept_trade(&mut self, trade_id: Uuid, accepted_by: PlayerColour) -> Result<()> {
         let trade = self.trades.get_mut(&trade_id);
 
-        if let None = trade {
+        if trade.is_none() {
             return Err(anyhow!("Trade not found"));
         };
 
@@ -106,6 +152,7 @@ impl Bank {
         Ok(())
     }
 
+    /// Indicate that the player offering the trade is willing to finalize the player
     pub fn finalize_trade(&mut self, trade_id: Uuid, player: PlayerColour) -> Result<()> {
         let trade = self.trades.get_mut(&trade_id);
 
@@ -119,9 +166,15 @@ impl Bank {
     }
 }
 
+impl Default for Bank {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use super::Bank;
+    use super::*;
     use crate::{resources::Resources, *};
 
     #[test]
@@ -174,12 +227,58 @@ mod test {
     #[test]
     fn test_propose_trade() {
         let mut b = Bank::new();
-        let mut p1 = player::PlayerColour::Red;
+        let p1 = player::PlayerColour::Red;
         let trade_id = b.propose_trade(
             p1,
             Resources::new_explicit(0, 0, 1, 0, 1),
             Resources::new_explicit(2, 0, 0, 0, 0),
         );
         assert_eq!(b.trades.len(), 1);
+        assert!(b.get_trade(trade_id).is_some());
+    }
+
+    #[test]
+    fn test_accept_trade() {
+        let mut b = Bank::new();
+        let p1 = player::PlayerColour::Red;
+        let p2 = player::PlayerColour::Blue;
+        let trade_id = b.propose_trade(
+            p1,
+            Resources::new_explicit(0, 0, 1, 0, 1),
+            Resources::new_explicit(2, 0, 0, 0, 0),
+        );
+        assert!(b.accept_trade(trade_id, p2).is_ok());
+        assert_eq!(
+            *b.get_trade(trade_id).unwrap().state(),
+            trade::TradeState::Proposed
+        );
+    }
+
+    #[test]
+    fn test_finalize_trade() {
+        let mut b = Bank::new();
+        let p1 = player::PlayerColour::Red;
+        let p2 = player::PlayerColour::Blue;
+        let trade_id = b.propose_trade(
+            p1,
+            Resources::new_explicit(0, 0, 1, 0, 1),
+            Resources::new_explicit(2, 0, 0, 0, 0),
+        );
+        let _ = b.accept_trade(trade_id, p2);
+        let _ = b.finalize_trade(trade_id, p2);
+
+        assert_eq!(
+            *b.get_trade(trade_id).unwrap().state(),
+            trade::TradeState::LockedIn
+        )
+    }
+
+    #[test]
+    fn test_return_dev_card() {
+        let mut b = Bank::new();
+        let dc = b.distribute_random_development_card();
+
+        assert!(dc.is_ok());
+        b.return_dev_card(dc.unwrap());
     }
 }

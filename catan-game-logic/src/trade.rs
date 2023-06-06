@@ -2,14 +2,17 @@ use crate::{player::PlayerColour, resources::Resources};
 
 use anyhow::{anyhow, Result};
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum TradeState {
     Proposed,
     LockedIn,
     Accepted,
 }
 
+use serde::{Deserialize, Serialize};
 use TradeState::*;
 
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Trade {
     from: PlayerColour,
     accepted_by: Vec<PlayerColour>,
@@ -85,5 +88,9 @@ impl Trade {
 
     pub fn wants(&self) -> &Resources {
         &self.wants
+    }
+
+    pub fn state(&self) -> &TradeState {
+        &self.state
     }
 }
