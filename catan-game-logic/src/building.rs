@@ -4,7 +4,7 @@ use crate::resources::Resources;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Copy, Serialize, Deserialize, Clone)]
+#[derive(Debug, Copy, Serialize, Deserialize, Clone, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum Building {
     Settlement,

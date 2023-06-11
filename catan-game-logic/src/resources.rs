@@ -1,4 +1,6 @@
+use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
+use std::mem::variant_count;
 use std::ops::{Add, AddAssign};
 use std::ops::{Index, IndexMut};
 use std::ops::{Mul, MulAssign};
@@ -17,6 +19,20 @@ pub enum ResourceKind {
 }
 
 use ResourceKind::*;
+
+impl ResourceKind {
+    pub fn random() -> Self {
+        let mut rng = thread_rng();
+        match rng.gen_range(0..=variant_count::<ResourceKind>() - 1) {
+            0 => Ore,
+            1 => Grain,
+            2 => Wool,
+            3 => Brick,
+            4 => Lumber,
+            n => panic!("Invalid index, i: {}", n),
+        }
+    }
+}
 
 impl<S> From<S> for ResourceKind
 where
@@ -214,6 +230,8 @@ impl Default for Resources {
 
 #[cfg(test)]
 mod test {
+    use std::panic::catch_unwind;
+
     use super::*;
 
     #[test]
@@ -274,5 +292,14 @@ mod test {
 
         let r = Building::City.get_resource_cost();
         assert!(r.can_build(Building::City));
+    }
+    #[test]
+    fn test_random() {
+        let resources = catch_unwind(|| {
+            (0..10).for_each(|_| {
+                ResourceKind::random();
+            })
+        });
+        assert!(resources.is_ok());
     }
 }

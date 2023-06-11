@@ -93,4 +93,8 @@ impl Trade {
     pub fn state(&self) -> &TradeState {
         &self.state
     }
+
+    pub fn state_mut(&mut self) -> &mut TradeState {
+        &mut self.state
+    }
 }

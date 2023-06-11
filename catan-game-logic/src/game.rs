@@ -50,7 +50,7 @@ impl Game {
         self.players.push(Player::new(colour));
     }
 
-    pub fn roll_dice(&self) -> (u8, u8) {
+    pub fn roll_dice() -> (u8, u8) {
         let mut rng = thread_rng();
         (rng.gen_range(1..6), rng.gen_range(1..6))
     }
@@ -71,15 +71,17 @@ impl Game {
 
     /// Handle the final step of trading, moving the resources between the two players
     pub fn finalize_trade(&mut self, trade_id: Uuid) -> Result<()> {
-        let trade = match self.bank.get_trade(trade_id) {
+        let mut trade = match self.bank.get_trade_mut(trade_id) {
             Some(trade) => trade.clone(),
             None => return Err(anyhow!("Could not find trade with that ID")),
         };
 
         match trade.state() {
-            Accepted => (),
-            LockedIn | Proposed => return Err(anyhow!("Cannot finalize trade at this time")),
+            LockedIn => (),
+            Accepted | Proposed => return Err(anyhow!("Cannot finalize trade at this time")),
         };
+
+        *trade.state_mut() = Accepted;
 
         let offering: Resources = *trade.offering();
         let wants: Resources = *trade.wants();
@@ -120,7 +122,13 @@ impl Game {
 
 impl Default for Game {
     fn default() -> Self {
-        Self::new()
+        Self {
+            players: Vec::new(),
+            board: Board::default(),
+            bank: Bank::new(),
+            state: GameState::Setup,
+            turn_no: 0,
+        }
     }
 }
 
@@ -129,7 +137,7 @@ mod test {
     use crate::{bank::*, board::*, game::*};
     #[test]
     fn test_init() {
-        let g = Game::new();
+        let g = Game::default();
         assert_eq!(
             g,
             Game {
@@ -149,7 +157,7 @@ mod test {
             g,
             Game {
                 players: Vec::new(),
-                board: Board::new(),
+                board: Board::default(),
                 bank: Bank::new(),
                 state: GameState::Setup,
                 turn_no: 0,
@@ -169,7 +177,7 @@ mod test {
                     Player::new(PlayerColour::Blue),
                     Player::new(PlayerColour::Purple)
                 ],
-                board: Board::new(),
+                board: Board::default(),
                 bank: Bank::new(),
                 state: GameState::Setup,
                 turn_no: 0,
@@ -189,8 +197,7 @@ mod test {
 
     #[test]
     fn test_roll_dice() {
-        let g = Game::new();
-        let (d1, d2) = g.roll_dice();
+        let (d1, d2) = Game::roll_dice();
         let roll = d1 + d2;
 
         assert!(roll > 0 && roll < 12);
@@ -240,9 +247,8 @@ mod test {
             .expect("Could not find trade with that ID");
         b.finalize_trade(trade_id, PlayerColour::Blue)
             .expect("Could not find trade with that ID");
-
-        g.finalize_trade(trade_id)
-            .expect("Could not find trade with that ID");
+        println!("{:#?}", g.get_bank());
+        g.finalize_trade(trade_id).unwrap();
 
         let red = g.get_player(&PlayerColour::Red).unwrap();
         assert_eq!(*red.resources(), Resources::new_explicit(2, 0, 0, 0, 0));
