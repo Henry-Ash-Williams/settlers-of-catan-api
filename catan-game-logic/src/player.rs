@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{development_cards::DevelopmentCard, resources::Resources};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PlayerColour {
     Red,
     Green,

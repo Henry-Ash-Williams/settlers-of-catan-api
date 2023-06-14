@@ -9,7 +9,7 @@ use std::ops::{Sub, SubAssign};
 use crate::building::Building;
 
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Copy, Clone)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum ResourceKind {
     Ore,
     Grain,

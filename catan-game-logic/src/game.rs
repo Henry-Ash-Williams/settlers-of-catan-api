@@ -152,7 +152,7 @@ mod test {
 
     #[test]
     fn test_add_player() {
-        let mut g = Game::new();
+        let mut g = Game::default();
         assert_eq!(
             g,
             Game {

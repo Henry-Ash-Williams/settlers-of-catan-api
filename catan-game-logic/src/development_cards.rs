@@ -3,6 +3,7 @@ use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[serde(rename_all = "snake_case")]
 pub enum DevelopmentCard {
     YearOfPlenty,
     Monopoly,

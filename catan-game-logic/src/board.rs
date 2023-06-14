@@ -1,10 +1,11 @@
 use std::mem::variant_count;
+use std::ops::Index;
 
-use petgraph::visit::IntoNodeIdentifiers;
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use petgraph::graph::Node;
 use petgraph::prelude::*;
 
 use crate::building::Building;
@@ -14,7 +15,7 @@ use crate::Game;
 pub const DEFAULT_TILE_COUNT: usize = 19;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum HarborKind {
     Generic,
     Special(ResourceKind),
@@ -32,7 +33,7 @@ impl HarborKind {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum TileKind {
     Resource(ResourceKind),
     Desert,
@@ -113,6 +114,13 @@ impl Default for Tile {
     }
 }
 
+/// Helper macro to make generating graphs with connections between nodes easier
+macro_rules! graph {
+    ($graph:ident, $node_refs:ident, [$([$from:expr => [$($to:expr),*]]),*]) => {{
+        $graph.extend_with_edges([$($(($node_refs[$from - 1], $node_refs[$to - 1]),)*)*]);
+    }}
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Board(UnGraph<Tile, Option<Building>>);
 
@@ -124,41 +132,28 @@ impl Board {
             ids.push(graph.add_node(Tile::random()));
         }
 
-        // FIXME: There's definitely a better way to do this but fuck you
-        graph.extend_with_edges([
-            (ids[0], ids[1]),
-            (ids[0], ids[3]),
-            (ids[0], ids[4]),
-            (ids[1], ids[0]),
-            (ids[1], ids[4]),
-            (ids[1], ids[5]),
-            (ids[1], ids[2]),
-            (ids[2], ids[1]),
-            (ids[2], ids[5]),
-            (ids[2], ids[6]),
-            (ids[3], ids[0]),
-            (ids[3], ids[4]),
-            (ids[3], ids[8]),
-            (ids[3], ids[7]),
-            (ids[4], ids[0]),
-            (ids[4], ids[1]),
-            (ids[4], ids[5]),
-            (ids[4], ids[9]),
-            (ids[4], ids[8]),
-            (ids[4], ids[3]),
-            (ids[5], ids[1]),
-            (ids[5], ids[2]),
-            (ids[5], ids[6]),
-            (ids[5], ids[10]),
-            (ids[5], ids[9]),
-            (ids[5], ids[4]),
-            (ids[6], ids[2]),
-            (ids[6], ids[5]),
-            (ids[6], ids[10]),
-            (ids[6], ids[11]),
-            (ids[7], ids[3]),
-            (ids[7], ids[8]),
-            (ids[7], ids[12]),
+        // FIXME: There's probably a good way to extend this to game boards
+        // with >= 7 tiles in diameter, but this works fine for now
+        graph!(graph, ids, [
+               [1 => [2, 4, 5]],
+               [2 => [1, 5, 6, 3]],
+               [3 => [2, 6, 7]],
+               [4 => [1, 5, 9, 8]],
+               [5 => [1, 2, 6, 10, 9, 4]],
+               [6 => [2, 3, 7, 11, 10, 5]],
+               [7 => [3, 6, 11, 12]],
+               [8 => [4, 9, 13]],
+               [9 => [4, 5, 10, 14, 13, 8]],
+               [10 => [5, 6, 11, 15, 14, 9]],
+               [11 => [6, 7, 12, 16, 15, 10]],
+               [12 => [7, 11, 16]],
+               [13 => [8, 9, 14, 17]],
+               [14 => [9, 10, 11, 16, 19, 18, 14]],
+               [15 => [10, 11, 16, 19, 18, 14]],
+               [16 => [12, 11, 15, 19]],
+               [17 => [13, 14, 18]],
+               [18 => [17, 14, 15, 19]],
+               [19 => [18, 15, 16]]
         ]);
 
         Board(graph)
@@ -182,6 +177,16 @@ impl PartialEq for Board {
         let edges_match = self.0.edge_indices().all(|idx| self.0[idx] == other.0[idx]);
 
         nodes_match && edges_match
+    }
+}
+
+impl Index<usize> for Board {
+    type Output = Node<Tile>;
+    fn index(&self, target: usize) -> &Self::Output {
+        if target > DEFAULT_TILE_COUNT {
+            panic!("Index out of bounds");
+        }
+        &self.0.raw_nodes()[target]
     }
 }
 
@@ -213,5 +218,17 @@ mod test {
             assert!(Uuid::parse_str(&node.id().to_string()).is_ok());
             assert!(2 <= *node.token() && *node.token() <= 12)
         }
+
+        assert_eq!(b.0.node_count(), 19);
+        assert_eq!(b.0.edge_count(), 85);
+    }
+
+    #[test]
+    fn test_serde() {
+        let b = Board::new();
+
+        let ser = serde_json::to_string(&b).unwrap();
+        let de: Board = serde_json::from_str(&ser).unwrap();
+        assert_eq!(b, de);
     }
 }
